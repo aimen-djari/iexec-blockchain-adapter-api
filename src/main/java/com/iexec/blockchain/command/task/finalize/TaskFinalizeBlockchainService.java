@@ -16,10 +16,10 @@
 
 package com.iexec.blockchain.command.task.finalize;
 
-
 import com.iexec.blockchain.command.generic.CommandBlockchain;
 import com.iexec.blockchain.tool.IexecHubService;
 import com.iexec.common.chain.ChainTask;
+import com.iexec.common.chain.ChainDeal;
 import com.iexec.common.chain.ChainTaskStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,51 +33,59 @@ import static com.iexec.common.utils.DateTimeUtils.now;
 @Service
 public class TaskFinalizeBlockchainService implements CommandBlockchain<TaskFinalizeArgs> {
 
-    private final IexecHubService iexecHubService;
+	private final IexecHubService iexecHubService;
 
-    public TaskFinalizeBlockchainService(IexecHubService iexecHubService) {
-        this.iexecHubService = iexecHubService;
-    }
+	public TaskFinalizeBlockchainService(IexecHubService iexecHubService) {
+		this.iexecHubService = iexecHubService;
+	}
 
-    @Override
-    public boolean canSendBlockchainCommand(TaskFinalizeArgs args) {
-        String chainTaskId = args.getChainTaskId();
+	@Override
+	public boolean canSendBlockchainCommand(TaskFinalizeArgs args) {
+		String chainTaskId = args.getChainTaskId();
 
-        Optional<ChainTask> optional = iexecHubService.getChainTask(chainTaskId);
-        if (optional.isEmpty()) {
-            logError(chainTaskId, args, "blockchain read");
-            return false;
-        }
-        ChainTask chainTask = optional.get();
-        if (!chainTask.getStatus().equals(ChainTaskStatus.REVEALING)) {
-            logError(chainTaskId, args, "task is not revealing");
-            return false;
-        }
-        if (!(now() < chainTask.getFinalDeadline())) {
-            logError(chainTaskId, args, "after final deadline");
-            return false;
-        }
-        boolean hasEnoughRevealers =
-                chainTask.getRevealCounter() == chainTask.getWinnerCounter()
-                        || (chainTask.getRevealCounter() > 0
-                        && chainTask.getRevealDeadline() <= now());
-        if (!hasEnoughRevealers) {
-            logError(chainTaskId, args, "not enough revealers");
-            return false;
-        }
-        return true;
-    }
+		Optional<ChainTask> optional = iexecHubService.getChainTask(chainTaskId);
+		if (optional.isEmpty()) {
+			logError(chainTaskId, args, "blockchain read");
+			return false;
+		}
+		ChainTask chainTask = optional.get();
+		
+		Optional<ChainDeal> oChainDeal = iexecHubService.getChainDeal(chainTask.getDealid());
+		ChainDeal chainDeal = oChainDeal.get();
 
-    private void logError(String chainTaskId, TaskFinalizeArgs args, String error) {
-        log.error("Finalize task blockchain call is likely to revert ({}) " +
-                "[chainTaskId:{}, args:{}]", error, chainTaskId, args);
-    }
+		if (chainDeal.getChainCategory().getId() == 5 && chainTask.getContributionDeadline() <= now()
+				&& chainTask.getStatus().equals(ChainTaskStatus.ACTIVE)) {
+			log.info("can send finalize() for a timed out service");
+			return true;
+		}
+		log.info("isService: {}, timeout: {}, now: {}, isActive: {}", chainDeal.getChainCategory().getId() == 5,
+				chainTask.getContributionDeadline(), now(), chainTask.getStatus().equals(ChainTaskStatus.ACTIVE));
+		
+		if (!chainTask.getStatus().equals(ChainTaskStatus.REVEALING)) {
+			logError(chainTaskId, args, "task is not revealing");
+			return false;
+		}
+		if (!(now() < chainTask.getFinalDeadline())) {
+			logError(chainTaskId, args, "after final deadline");
+			return false;
+		}
+		boolean hasEnoughRevealers = chainTask.getRevealCounter() == chainTask.getWinnerCounter()
+				|| (chainTask.getRevealCounter() > 0 && chainTask.getRevealDeadline() <= now());
+		if (!hasEnoughRevealers) {
+			logError(chainTaskId, args, "not enough revealers");
+			return false;
+		}
+		return true;
+	}
 
-    @Override
-    public TransactionReceipt sendBlockchainCommand(TaskFinalizeArgs args) throws Exception {
-        return iexecHubService.finalize(args.getChainTaskId(),
-                args.getResultLink(),
-                args.getCallbackData());
-    }
+	private void logError(String chainTaskId, TaskFinalizeArgs args, String error) {
+		log.error("Finalize task blockchain call is likely to revert ({}) " + "[chainTaskId:{}, args:{}]", error,
+				chainTaskId, args);
+	}
+
+	@Override
+	public TransactionReceipt sendBlockchainCommand(TaskFinalizeArgs args) throws Exception {
+		return iexecHubService.finalize(args.getChainTaskId(), args.getResultLink(), args.getCallbackData());
+	}
 
 }
